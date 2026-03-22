@@ -20,7 +20,6 @@ class JinaSingleFramePipeline(BaseEmbeddingPipeline):
     BATCH_SIZE = 1
 
     def _load_model(self) -> None:
-        import torch
         from sentence_transformers import SentenceTransformer
 
         cache_key = f"st:{self.MODEL_ID}:{self.device}"
@@ -31,7 +30,6 @@ class JinaSingleFramePipeline(BaseEmbeddingPipeline):
                 self.MODEL_ID,
                 trust_remote_code=True,
                 device=self.device,
-                model_kwargs={"torch_dtype": torch.float16},
             )
 
         self._model = get_shared_model(cache_key, _loader)
@@ -42,8 +40,9 @@ class JinaSingleFramePipeline(BaseEmbeddingPipeline):
     ) -> List[EmbeddingResult]:
         self.ensure_loaded()
         results: List[EmbeddingResult] = []
+        total = len(frame_paths)
 
-        for i in range(0, len(frame_paths), self.BATCH_SIZE):
+        for i in range(0, total, self.BATCH_SIZE):
             batch_paths = frame_paths[i : i + self.BATCH_SIZE]
             batch_ts = timestamps[i : i + self.BATCH_SIZE]
 
@@ -57,7 +56,9 @@ class JinaSingleFramePipeline(BaseEmbeddingPipeline):
                 results.append(EmbeddingResult(ts, ts + 1.0, np.asarray(emb)))
 
             del batch_frames
+            print(f"        {i + len(batch_ts)}/{total}", end="\r", flush=True)
 
+        print(flush=True)
         return results
 
     def embed_text(self, text: str) -> np.ndarray:

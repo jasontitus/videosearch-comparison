@@ -37,7 +37,7 @@ class JinaNative3DPipeline(BaseEmbeddingPipeline):
             AutoModel.from_pretrained(
                 self.MODEL_ID,
                 trust_remote_code=True,
-                dtype=torch.float16,
+                dtype=torch.float32,
             )
             .to(self.device)
             .eval()

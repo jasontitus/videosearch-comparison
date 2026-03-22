@@ -23,14 +23,15 @@ images into one sequence, so attention scales O(n²) with total tokens.
 
 All measurements on MPS with float16 precision. Frame extraction at 1 FPS.
 
-| Pipeline | Model Size | Embedding Dim | Batch Size | Frames/s | Notes |
-|---|---:|---:|---:|---:|---|
-| Frame extraction | — | — | — | ~24 | cv2 + JPEG save |
-| **Meta PE-Core L14** | ~300M | 1024 | 16 | **5.92** | Fastest embedding pipeline |
-| SigLIP 2 (so400m) | ~400M | 1152 | 16 | 4.04 | Removed — poor search quality |
-| **Jina v4 Single Frame** | ~3.8B | 2048 | 1 | **0.45** | Best at batch_size=1 |
-| **Jina v4 Grid Composite** | ~3.8B | 2048 | 1 grid/4 frames | **0.75** | 4 frames → 1 grid image |
-| Jina v4 Native 3D | ~3.8B | varies | 4 | errors | Chat template bug (WIP) |
+| Pipeline | Model Size | Embedding Dim | Batch Size | Avg FPS | Min | Max | Notes |
+|---|---:|---:|---:|---:|---:|---:|---|
+| Frame extraction | — | — | — | ~28 | 24 | 57 | cv2 + JPEG save |
+| **Meta PE-Core L14** | ~300M | 1024 | 16 | **7.00** | 6.28 | 7.23 | Fastest embedding pipeline |
+| **Jina v4 Single Frame** | ~3.8B | 2048 | 1 | **0.19** | 0.19 | 0.20 | batch_size=1 optimal on MPS |
+| **Jina v4 Grid Composite** | ~3.8B | 2048 | 1 grid/4 frames | **0.73** | 0.66 | 0.75 | 4 frames → 1 grid image |
+| Jina v4 Native 3D | ~3.8B | varies | 4 | — | — | — | Chat template bug (WIP) |
+
+*Measured across all 15 videos (5,764 total frames). Full run: 9h50m.*
 
 ## MPS Compatibility Notes
 
@@ -52,10 +53,10 @@ For a typical 5-minute video (300 frames at 1 FPS):
 
 | Pipeline | Time | Note |
 |---|---:|---|
-| Frame extraction | ~12s | |
-| PE-Core L14 | ~51s | |
-| Jina v4 Single Frame | ~11 min | |
-| Jina v4 Grid Composite | ~6.7 min | 75 grid images |
-| **Total (all 3 pipelines)** | **~18 min** | |
+| Frame extraction | ~11s | |
+| PE-Core L14 | ~43s | |
+| Jina v4 Single Frame | ~26 min | |
+| Jina v4 Grid Composite | ~6.8 min | 75 grid images |
+| **Total (all 3 pipelines)** | **~34 min** | |
 
-For all 15 videos (~3,800 total frames): **~3.5 hours estimated**
+Full run across 15 videos (5,764 frames): **9h 50m**

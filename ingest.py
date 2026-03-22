@@ -46,6 +46,7 @@ def _memory_cleanup() -> None:
         import torch
 
         if hasattr(torch, "mps") and hasattr(torch.mps, "empty_cache"):
+            torch.mps.synchronize()
             torch.mps.empty_cache()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()

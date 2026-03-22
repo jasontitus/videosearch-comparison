@@ -20,7 +20,6 @@ class JinaGridPipeline(BaseEmbeddingPipeline):
     CHUNK_SIZE = 4  # 4 frames → one 2×2 grid
 
     def _load_model(self) -> None:
-        import torch
         from sentence_transformers import SentenceTransformer
 
         cache_key = f"st:{self.MODEL_ID}:{self.device}"
@@ -31,7 +30,6 @@ class JinaGridPipeline(BaseEmbeddingPipeline):
                 self.MODEL_ID,
                 trust_remote_code=True,
                 device=self.device,
-                model_kwargs={"torch_dtype": torch.float16},
             )
 
         self._model = get_shared_model(cache_key, _loader)
