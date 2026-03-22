@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Video Search Eval Workbench</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* Smooth card hover */
+    .result-card { transition: box-shadow .15s ease; }
+    .result-card:hover { box-shadow: 0 4px 14px rgba(0,0,0,.12); }
+  </style>
+</head>
+<body class="bg-gray-100 min-h-screen text-gray-900">
+
+  <div class="max-w-[1600px] mx-auto px-4 py-8">
+
+    <!-- Header -->
+    <h1 class="text-2xl font-bold mb-1">Video Search Eval Workbench</h1>
+    <p id="status" class="text-sm text-gray-500 mb-6"></p>
+
+    <!-- Search bar -->
+    <form id="search-form" class="flex gap-3 mb-8">
+      <input
+        id="search-input"
+        type="text"
+        placeholder="Describe what you're looking for…"
+        autocomplete="off"
+        class="flex-1 px-4 py-3 rounded-lg border border-gray-300 shadow-sm
+               focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
+      />
+      <button
+        type="submit"
+        class="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold
+               hover:bg-blue-700 active:bg-blue-800 transition shadow-sm"
+      >Search</button>
+    </form>
+
+    <!-- Results -->
+    <div id="results"></div>
+  </div>
+
+  <script src="/static/app.js?v=2"></script>
+</body>
+</html>
