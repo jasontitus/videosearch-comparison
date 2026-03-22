@@ -1,13 +1,19 @@
 """Pipeline D — Jina v4 with native 3D video processing via Qwen2.5-VL MRoPE.
 
-This pipeline bypasses the standard image API. It uses qwen_vl_utils and
-Qwen2_5_VLProcessor to build `pixel_values_videos` / `video_grid_thw` tensors,
-injects them into the model's forward pass, and mean-pools the hidden states
-to produce a single embedding vector per video chunk.
+Uses the Jina v4 model (which wraps Qwen2.5-VL) with video inputs to leverage
+3D Multi-Resolution Rotary Position Embeddings for temporal understanding.
+
+Key fixes over the initial WIP version:
+- Correct torch_dtype (float16, MPS-compatible) instead of wrong kwarg name
+- Monkey-patch Jina's get_last_hidden_states to pass video_grid_thw to
+  get_rope_index, enabling proper 3D MRoPE for video frames
+- Pass task_label="retrieval" through the Jina model's forward for LoRA adapters
+- Use Jina's encode_text for text queries (proper LoRA-adapted embeddings)
 """
 
 from __future__ import annotations
 
+import types
 from pathlib import Path
 from typing import List
 
@@ -16,6 +22,65 @@ from PIL import Image
 
 from app.pipelines.base import BaseEmbeddingPipeline, EmbeddingResult
 from app.pipelines.registry import register
+
+
+def _patch_jina_video_rope(model) -> None:
+    """Patch JinaEmbeddingsV4Model.get_last_hidden_states to pass
+    video_grid_thw to get_rope_index, enabling 3D MRoPE for video.
+
+    The upstream Jina code only passes image_grid_thw, which means video
+    frames get flat 1-D position IDs instead of proper temporal-spatial 3-D
+    positions.  This one-line addition is the minimal fix.
+    """
+    import torch
+
+    # Navigate through PeftModel → LoraModel → JinaEmbeddingsV4Model
+    jina_model = model
+    if hasattr(jina_model, "base_model") and hasattr(jina_model.base_model, "model"):
+        jina_model = jina_model.base_model.model
+
+    # Resolve the parent class (Qwen2_5_VLForConditionalGeneration) for super() calls
+    parent_cls = type(jina_model).__mro__[1]
+
+    def _patched_get_last_hidden_states(
+        self, task_label, input_ids, attention_mask, **kwargs
+    ):
+        # Original pixel_values trimming logic (unchanged)
+        if "pixel_values" in kwargs:
+            offsets = kwargs["image_grid_thw"][:, 1] * kwargs["image_grid_thw"][:, 2]
+            kwargs["pixel_values"] = torch.cat(
+                [pv[:o] for pv, o in zip(kwargs["pixel_values"], offsets)], dim=0
+            )
+
+        # --- THE FIX: also pass video_grid_thw for 3D MRoPE ---
+        position_ids, rope_deltas = self.model.get_rope_index(
+            input_ids=input_ids,
+            image_grid_thw=kwargs.get("image_grid_thw", None),
+            video_grid_thw=kwargs.get("video_grid_thw", None),
+            attention_mask=attention_mask,
+        )
+
+        kwargs["output_hidden_states"] = True
+        outputs = parent_cls.forward(
+            self,
+            task_label=task_label,
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            **kwargs,
+            position_ids=position_ids,
+            rope_deltas=rope_deltas,
+            use_cache=False,
+        )
+
+        hidden_states = outputs.hidden_states
+        if not hidden_states:
+            raise ValueError("Hidden states not found in model output")
+        return hidden_states[-1]
+
+    jina_model.get_last_hidden_states = types.MethodType(
+        _patched_get_last_hidden_states, jina_model
+    )
+    print("[jina_native_3d] Patched get_last_hidden_states for video_grid_thw support")
 
 
 @register
@@ -37,11 +102,15 @@ class JinaNative3DPipeline(BaseEmbeddingPipeline):
             AutoModel.from_pretrained(
                 self.MODEL_ID,
                 trust_remote_code=True,
-                dtype=torch.float16,
+                torch_dtype=torch.float16,
             )
             .to(self.device)
             .eval()
         )
+
+        # Patch the Jina model so video_grid_thw flows into get_rope_index
+        _patch_jina_video_rope(self._model)
+
         print(f"[{self.name}] Ready on {self.device}")
 
     # ------------------------------------------------------------------
@@ -49,7 +118,6 @@ class JinaNative3DPipeline(BaseEmbeddingPipeline):
     # ------------------------------------------------------------------
     def _encode_video_chunk(self, frames: List[Image.Image]) -> np.ndarray:
         import torch
-        import torch.nn.functional as F
         from qwen_vl_utils import process_vision_info
 
         # Build the message structure that qwen_vl_utils expects
@@ -83,13 +151,10 @@ class JinaNative3DPipeline(BaseEmbeddingPipeline):
         ).to(self.device)
 
         with torch.no_grad():
-            outputs = self._model(**inputs)
-            hidden = outputs.last_hidden_state  # (1, seq_len, hidden_dim)
-
-            # Mean pooling with attention mask
-            mask = inputs["attention_mask"].unsqueeze(-1).float()
-            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
-            emb = F.normalize(pooled, p=2, dim=-1)
+            # Pass task_label for LoRA adapter selection; the patched
+            # get_last_hidden_states handles video_grid_thw for 3D MRoPE.
+            outputs = self._model(task_label="retrieval", **inputs)
+            emb = outputs.single_vec_emb  # Already mean-pooled & normalized
 
         return emb.squeeze(0).cpu().numpy()
 
@@ -116,32 +181,17 @@ class JinaNative3DPipeline(BaseEmbeddingPipeline):
         return results
 
     def embed_text(self, text: str) -> np.ndarray:
-        """Encode a text query using the same raw model + mean pooling.
+        """Encode a text query using Jina's encode_text with LoRA adapters.
 
-        This keeps Pipeline D fully siloed — it never shares encoders with
-        Pipelines B/C.  The trade-off is that we do not activate task-specific
-        LoRA adapters (if any); the embedding is the raw mean-pooled hidden
-        state, identical in approach to the video encoding above.
+        This uses the model's built-in encode_text which activates the
+        task-specific LoRA adapter for 'retrieval' queries, producing
+        embeddings that are properly aligned with the video embeddings.
         """
-        import torch
-        import torch.nn.functional as F
-
         self.ensure_loaded()
-
-        inputs = self._processor(
-            text=[text],
-            return_tensors="pt",
-            padding=True,
-        ).to(self.device)
-
-        with torch.no_grad():
-            outputs = self._model(**inputs)
-            hidden = outputs.last_hidden_state
-            mask = inputs["attention_mask"].unsqueeze(-1).float()
-            pooled = (hidden * mask).sum(dim=1) / mask.sum(dim=1).clamp(min=1e-9)
-            emb = F.normalize(pooled, p=2, dim=-1)
-
-        return emb.squeeze(0).cpu().numpy()
+        emb = self._model.encode_text(
+            [text], task="retrieval", prompt_name="query", return_numpy=True
+        )
+        return emb[0]
 
     def unload(self) -> None:
         self._model = None
