@@ -26,6 +26,7 @@ import app.pipelines  # noqa: F401
 from app.config import BASE_DIR, THUMBNAILS_DIR, VIDEOS_DIR, get_device
 from app.database import Embedding, SessionLocal, Video, init_db
 from app.pipelines.registry import clear_shared_models, get_all_pipelines
+from app.utils.perf_logger import PerfLogger
 from app.utils.video import cleanup_frame_cache, extract_frames_to_disk
 
 FRAME_CACHE_DIR = BASE_DIR / ".frame_cache"
@@ -71,11 +72,11 @@ def main() -> None:
     print(f"Pipelines: {', '.join(pipeline_order)}")
 
     db = SessionLocal()
-
-    # Collect per-pipeline throughput stats: {pipeline_name: [fps_values]}
-    fps_stats: dict[str, list[float]] = {
-        p: [] for group in PIPELINE_GROUPS for p in group
-    }
+    perf = PerfLogger()
+    for group in PIPELINE_GROUPS:
+        for pname in group:
+            p = pipelines[pname]
+            perf.add_pipeline(pname, p.display_name)
 
     try:
         for video_path in tqdm(video_files, desc="Videos", unit="vid"):
@@ -99,6 +100,8 @@ def main() -> None:
                 f"    {len(frame_paths)} frames extracted ({duration:.1f}s video) "
                 f"in {extract_elapsed:.1f}s ({extract_fps:.1f} frames/s)"
             )
+
+            vt = perf.log_extraction(filename, duration, len(frame_paths), extract_elapsed)
 
             # --- Phase 2: DB record (commit immediately so searches can find the video) ---
             video_record = Video(filename=filename, duration=duration)
@@ -124,7 +127,7 @@ def main() -> None:
 
                     n_frames = len(frame_paths)
                     embed_fps = n_frames / embed_elapsed if embed_elapsed > 0 else 0
-                    fps_stats[pname].append(embed_fps)
+                    perf.log_pipeline(vt, pname, n_frames, len(emb_results), embed_elapsed)
 
                     for er in emb_results:
                         # Find the thumbnail whose timestamp matches ts_start
@@ -170,21 +173,10 @@ def main() -> None:
     finally:
         db.close()
 
-    # --- Summary ---
-    print("\n" + "=" * 60)
-    print("Ingestion complete!  Throughput summary (frames/s):")
-    print(f"{'Pipeline':<35} {'Avg FPS':>10} {'Min':>8} {'Max':>8} {'Videos':>7}")
-    print("-" * 60)
-    for pname in [p for group in PIPELINE_GROUPS for p in group]:
-        vals = fps_stats[pname]
-        if vals:
-            avg = sum(vals) / len(vals)
-            print(
-                f"{pname:<35} {avg:>10.2f} {min(vals):>8.2f} {max(vals):>8.2f} {len(vals):>7}"
-            )
-        else:
-            print(f"{pname:<35} {'(no data)':>10}")
-    print("=" * 60)
+    # --- Performance report ---
+    print(perf.summary(device=device))
+    perf.save_json(str(BASE_DIR / "perf_report.json"))
+    print(f"\nDetailed report saved to perf_report.json")
 
 
 if __name__ == "__main__":

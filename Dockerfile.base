@@ -1,0 +1,32 @@
+FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.11 python3.11-venv python3.11-dev python3-pip \
+    libpq5 libgl1 libglib2.0-0 git gcc g++ libpq-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -sf /usr/bin/python3.11 /usr/bin/python
+
+WORKDIR /app
+
+# Install PyTorch with CUDA
+RUN python -m pip install --no-cache-dir torch torchvision
+
+COPY requirements.txt .
+RUN python -m pip install --no-cache-dir -r requirements.txt \
+    google-cloud-storage python-multipart
+
+# PE-Core
+RUN python -m pip install --no-deps "git+https://github.com/facebookresearch/perception_models.git" \
+    && python -m pip install --no-cache-dir einops ftfy
+
+# Pre-download models to avoid cold-start downloads
+RUN python -c "\
+from sentence_transformers import SentenceTransformer; \
+SentenceTransformer('jinaai/jina-embeddings-v4', trust_remote_code=True); \
+print('Jina v4 cached')"
+
+RUN python -c "\
+import core.vision_encoder.pe as pe; \
+pe.CLIP.from_config('PE-Core-L14-336', pretrained=True); \
+print('PE-Core cached')"

@@ -8,19 +8,126 @@
   const results  = document.getElementById("results");
   const statusEl = document.getElementById("status");
 
+  // Media base URL — empty for local, GCS URL for cloud.
+  // Default to GCS if served from Firebase/Cloud Run (detected by hostname).
+  let mediaBase = location.hostname.includes("web.app") || location.hostname.includes("run.app")
+    ? "https://storage.googleapis.com/videosearch-comparison-media"
+    : "";
+
   // ---- Load status on page load ----
-  fetch("/api/status")
-    .then((r) => r.json())
-    .then((d) => {
-      const parts = d.pipelines.map(
-        (p) => `${p.display_name}: ${p.count} vectors`
-      );
-      statusEl.textContent =
-        `${d.total_videos} video(s) ingested  —  ${parts.join("  |  ")}`;
-    })
-    .catch(() => {
-      statusEl.textContent = "Could not reach backend";
-    });
+  function loadStatus() {
+    fetch("/api/status")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.media_base) mediaBase = d.media_base;
+        const parts = d.pipelines.map(
+          (p) => `${p.display_name}: ${p.count} vectors`
+        );
+        statusEl.textContent =
+          `${d.total_videos} video(s) ingested  —  ${parts.join("  |  ")}`;
+      })
+      .catch(() => {
+        statusEl.textContent = "Could not reach backend";
+      });
+  }
+  loadStatus();
+
+  // ---- Upload ----
+  const uploadZone = document.getElementById("upload-zone");
+  const fileInput  = document.getElementById("file-input");
+  const uploadProg = document.getElementById("upload-progress");
+  const uploadBar  = document.getElementById("upload-bar");
+  const uploadStat = document.getElementById("upload-status");
+  const videoList  = document.getElementById("video-list");
+
+  uploadZone.addEventListener("click", () => fileInput.click());
+  uploadZone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    uploadZone.classList.add("border-blue-400", "bg-blue-50");
+  });
+  uploadZone.addEventListener("dragleave", () => {
+    uploadZone.classList.remove("border-blue-400", "bg-blue-50");
+  });
+  uploadZone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    uploadZone.classList.remove("border-blue-400", "bg-blue-50");
+    const files = [...e.dataTransfer.files].filter((f) => f.name.endsWith(".mp4"));
+    if (files.length) uploadFiles(files);
+  });
+  fileInput.addEventListener("change", () => {
+    if (fileInput.files.length) uploadFiles([...fileInput.files]);
+  });
+
+  async function uploadFiles(files) {
+    uploadProg.classList.remove("hidden");
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      uploadStat.textContent = `Uploading ${file.name} (${i + 1}/${files.length})…`;
+
+      const xhr = new XMLHttpRequest();
+      const formData = new FormData();
+      formData.append("file", file);
+
+      await new Promise((resolve) => {
+        xhr.upload.onprogress = (e) => {
+          if (e.lengthComputable) {
+            uploadBar.style.width = Math.round((e.loaded / e.total) * 100) + "%";
+          }
+        };
+        xhr.onload = () => {
+          const resp = JSON.parse(xhr.responseText);
+          if (resp.error) {
+            uploadStat.textContent = `${file.name}: ${resp.error}`;
+          }
+          resolve();
+        };
+        xhr.onerror = () => {
+          uploadStat.textContent = `Upload failed: ${file.name}`;
+          resolve();
+        };
+        xhr.open("POST", "/api/upload", true);
+        xhr.send(formData);
+      });
+    }
+    uploadStat.textContent = "Upload complete!";
+    uploadBar.style.width = "100%";
+    setTimeout(() => uploadProg.classList.add("hidden"), 2000);
+    loadStatus();
+    loadVideoList();
+  }
+
+  async function loadVideoList() {
+    try {
+      const res = await fetch("/api/videos");
+      const videos = await res.json();
+      if (!videos.length) {
+        videoList.innerHTML = '<p class="text-gray-400 text-sm">No videos uploaded</p>';
+        return;
+      }
+      let html = `<table class="w-full text-xs">
+        <thead><tr class="text-left text-gray-500 border-b">
+          <th class="py-1">Filename</th><th class="py-1">Duration</th><th class="py-1">Embeddings</th>
+        </tr></thead><tbody>`;
+      for (const v of videos) {
+        const dur = v.duration ? fmtTime(v.duration) : "—";
+        const embs = Object.entries(v.pipelines).map(([k, c]) => `${k}: ${c}`).join(", ") || "none";
+        html += `<tr class="border-b border-gray-50">
+          <td class="py-1.5 truncate max-w-[300px]">${esc(v.filename)}</td>
+          <td class="py-1.5">${dur}</td>
+          <td class="py-1.5 text-gray-500">${embs}</td>
+        </tr>`;
+      }
+      html += "</tbody></table>";
+      videoList.innerHTML = html;
+    } catch {
+      videoList.innerHTML = "";
+    }
+  }
+
+  // Load video list when Manage Videos is opened
+  document.querySelector("details").addEventListener("toggle", (e) => {
+    if (e.target.open) loadVideoList();
+  });
 
   // ---- Search ----
   form.addEventListener("submit", (e) => {
@@ -41,7 +148,7 @@
           <path class="opacity-75" fill="currentColor"
                 d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
         </svg>
-        Searching… (first query may take a while as models load)
+        Searching... (first query may take a while as models load)
       </div>`;
 
     try {
@@ -86,7 +193,7 @@
             <div class="result-card rounded-lg border border-gray-100 overflow-hidden cursor-pointer"
                  data-file="${esc(r.filename)}" data-ts="${r.timestamp_start}">
               <div class="relative bg-gray-200">
-                <img src="/thumbnails/${encPath(r.thumbnail_path)}"
+                <img src="${mediaBase ? mediaBase + '/thumbnails/' : '/thumbnails/'}${encPath(r.thumbnail_path)}"
                      alt="${ts}" loading="lazy"
                      class="w-full aspect-video object-cover" />
                 <span class="absolute bottom-1 right-1 bg-black/70 text-white text-[11px]
@@ -106,7 +213,6 @@
     html += "</div>";
     results.innerHTML = html;
 
-    // Attach click handlers for video playback
     results.querySelectorAll(".result-card[data-file]").forEach((card) => {
       card.addEventListener("click", () => swapToVideo(card));
     });
@@ -115,7 +221,7 @@
   // ---- Click-to-play ----
   function swapToVideo(card) {
     const container = card.querySelector(".relative");
-    if (container.querySelector("video")) return; // already playing
+    if (container.querySelector("video")) return;
 
     const img = container.querySelector("img");
     if (img) img.style.display = "none";
@@ -124,7 +230,7 @@
     const file = card.getAttribute("data-file");
 
     const video = document.createElement("video");
-    video.src = `/videos/${encPath(file)}#t=${ts}`;
+    video.src = `${mediaBase ? mediaBase + '/videos/' : '/videos/'}${encPath(file)}#t=${ts}`;
     video.className = "w-full aspect-video object-cover bg-black";
     video.controls = true;
     video.autoplay = true;

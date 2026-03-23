@@ -1,0 +1,26 @@
+{
+  "hosting": {
+    "public": "static",
+    "ignore": ["firebase.json", "**/.*"],
+    "rewrites": [
+      {
+        "source": "**",
+        "run": {
+          "serviceId": "videosearch",
+          "region": "europe-west1"
+        }
+      }
+    ],
+    "headers": [
+      {
+        "source": "**",
+        "headers": [
+          {
+            "key": "Cache-Control",
+            "value": "no-cache"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,12 @@
+.venv/
+.git/
+.frame_cache/
+.env
+videos/
+thumbnails/
+__pycache__/
+*.pyc
+.DS_Store
+cloud-sql-proxy
+*.sql
+PLAN.md

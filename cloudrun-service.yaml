@@ -1,0 +1,41 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: videosearch
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+    run.googleapis.com/gpu-zonal-redundancy: disabled
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "1"
+        run.googleapis.com/cloudsql-instances: videosearch-comparison:us-central1:videosearch-db
+        run.googleapis.com/cpu-throttling: "false"
+        run.googleapis.com/startup-cpu-boost: "true"
+    spec:
+      containerConcurrency: 10
+      timeoutSeconds: 130
+      serviceAccountName: videosearch-runner@videosearch-comparison.iam.gserviceaccount.com
+      containers:
+        - image: us-central1-docker.pkg.dev/videosearch-comparison/videosearch/webapp:latest
+          ports:
+            - containerPort: 8080
+          resources:
+            limits:
+              cpu: "8"
+              memory: 24Gi
+              nvidia.com/gpu: "1"
+          env:
+            - name: GCS_BUCKET
+              value: videosearch-comparison-media
+            - name: DEVICE
+              value: cuda
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  key: latest
+                  name: database-url
+      nodeSelector:
+        run.googleapis.com/accelerator: nvidia-l4

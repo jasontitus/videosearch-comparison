@@ -23,9 +23,22 @@ class PECorePipeline(BaseEmbeddingPipeline):
         import core.vision_encoder.pe as pe
         import core.vision_encoder.transforms as pe_transforms
 
+        import torch
+
         print(f"[{self.name}] Loading {self.MODEL_NAME} …")
         model = pe.CLIP.from_config(self.MODEL_NAME, pretrained=True)
-        model = model.half().to(self.device).eval()
+
+        # Handle meta tensor loading — newer PyTorch may use meta tensors
+        # for model init, requiring to_empty + weight reload
+        try:
+            model = model.half().to(self.device).eval()
+        except NotImplementedError:
+            # Meta tensors can't be copied — materialize on target device
+            model = model.to_empty(device=self.device, dtype=torch.float16)
+            checkpoint = pe.CLIP.from_config(self.MODEL_NAME, pretrained=True)
+            model.load_state_dict(checkpoint.state_dict(), assign=True)
+            model = model.half().to(self.device).eval()
+            del checkpoint
 
         self._model = model
         self._preprocess = pe_transforms.get_image_transform(model.image_size)

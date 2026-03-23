@@ -12,11 +12,17 @@ DATABASE_URL = os.getenv(
     "postgresql://videosearch:videosearch@localhost:5432/videosearch",
 )
 
+GCS_BUCKET = os.getenv("GCS_BUCKET", "")
+SEARCH_BACKEND = os.getenv("SEARCH_BACKEND", "pytorch")  # "pytorch" or "gguf"
+LLAMA_SERVER_URL = os.getenv("LLAMA_SERVER_URL", "http://127.0.0.1:8090")
+GGUF_MODEL_PATH = os.getenv("GGUF_MODEL_PATH", "/models/jina-embeddings-v4-text-retrieval-Q8_0.gguf")
+
 VIDEOS_DIR = Path(os.getenv("VIDEOS_DIR", str(BASE_DIR / "videos")))
 THUMBNAILS_DIR = Path(os.getenv("THUMBNAILS_DIR", str(BASE_DIR / "thumbnails")))
 
-VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
-THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
+if not GCS_BUCKET:
+    VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+    THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def get_device() -> str:

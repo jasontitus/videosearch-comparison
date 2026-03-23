@@ -7,3 +7,6 @@ __pycache__/
 videos/
 thumbnails/
 *.egg-info/
+cloud-sql-proxy
+.firebase/
+perf_report.json
