@@ -64,7 +64,14 @@ class JinaGGUFTextPipeline(BaseEmbeddingPipeline):
         prefixed = f"Query: {text}"
 
         result = model.embed(prefixed)
-        emb = np.array(result[0], dtype=np.float32)
+
+        # model.embed() returns list of lists — flatten to 1D
+        emb = np.array(result, dtype=np.float32).flatten()
+
+        # Log dimension on first call for debugging
+        if not hasattr(self, '_dim_logged'):
+            print(f"[gguf] embed_text returned {emb.shape} (raw type: {type(result)}, len: {len(result)})")
+            self._dim_logged = True
 
         # Normalize
         norm = np.linalg.norm(emb)

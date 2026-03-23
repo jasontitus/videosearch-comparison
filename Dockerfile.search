@@ -1,40 +1,6 @@
-FROM python:3.11-slim
-
-# System deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 libgl1 libglib2.0-0 git gcc g++ libpq-dev curl \
-    && rm -rf /var/lib/apt/lists/*
+FROM us-central1-docker.pkg.dev/videosearch-comparison/videosearch/webapp-search-base:v1
 
 WORKDIR /app
-
-# Install PyTorch (CPU-only, much smaller than CUDA version)
-RUN pip install --no-cache-dir torch torchvision --index-url https://download.pytorch.org/whl/cpu
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    google-cloud-storage python-multipart httpx
-
-# PE-Core
-RUN pip install --no-deps "git+https://github.com/facebookresearch/perception_models.git" \
-    && pip install --no-cache-dir einops ftfy
-
-# Pre-download PE-Core model
-RUN python -c "\
-import core.vision_encoder.pe as pe; \
-pe.CLIP.from_config('PE-Core-L14-336', pretrained=True); \
-print('PE-Core cached')"
-
-# llama-cpp-python for in-process GGUF model loading
-RUN pip install --no-cache-dir llama-cpp-python
-
-# Download GGUF model
-RUN pip install --no-cache-dir huggingface_hub && \
-    python -c "\
-from huggingface_hub import hf_hub_download; \
-hf_hub_download('jinaai/jina-embeddings-v4-text-retrieval-GGUF', \
-    filename='jina-embeddings-v4-text-retrieval-Q8_0.gguf', \
-    local_dir='/models'); \
-print('GGUF Q8_0 downloaded')"
 
 COPY app/ app/
 COPY static/ static/
