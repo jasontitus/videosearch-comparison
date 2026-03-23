@@ -232,6 +232,54 @@ firebase init hosting --project=videosearch-comparison
 firebase deploy --only hosting
 ```
 
+## Current Live State (2026-03-23)
+
+### URLs
+- **Public app:** https://videosearch-comparison.web.app (Firebase → videosearch-cpu)
+- **CPU search (direct):** https://videosearch-cpu-1030499458764.europe-west1.run.app
+- **GPU service (direct):** https://videosearch-xsk5urbx2a-ew.a.run.app
+
+### Active Images
+| Image | Tag | Purpose |
+|-------|-----|---------|
+| `webapp-base` | `v1` | GPU base (CUDA, PyTorch, models) |
+| `webapp` | `v7-gpu` | GPU app code |
+| `webapp-search-base` | `v1` | CPU base (PyTorch CPU, llama-cpp-python, GGUF, PE-Core) |
+| `webapp-search` | `v1` | CPU search app code |
+
+### Active Revisions
+- `videosearch-cpu-00007-86w` — CPU search, 4 vCPU, 16GB RAM, scale 0-2
+- `videosearch` — GPU, 8 vCPU, 24GB RAM, L4 GPU, scale 0-1
+
+### Service Account
+- `videosearch-runner@videosearch-comparison.iam.gserviceaccount.com`
+- Roles: run.invoker, cloudsql.client, storage.objectAdmin, secretmanager.secretAccessor
+
+### Quick Reference
+```bash
+# Code-only rebuild + deploy (CPU search, ~30s)
+gcloud builds submit --config=cloudbuild-search.yaml --timeout=300
+gcloud run services update videosearch-cpu --region=europe-west1 \
+  --image=us-central1-docker.pkg.dev/videosearch-comparison/videosearch/webapp-search:v1
+
+# Code-only rebuild + deploy (GPU service, ~30s)
+gcloud builds submit --tag us-central1-docker.pkg.dev/videosearch-comparison/videosearch/webapp:v8-gpu --timeout=300
+gcloud run deploy videosearch --image=...:v8-gpu --region=europe-west1 --no-gpu-zonal-redundancy
+
+# Ingest new videos
+gcloud run jobs execute ingest-new --region=europe-west1
+
+# Reingest single pipeline
+gcloud run jobs execute reingest-native3d --region=europe-west1
+
+# Check logs
+gcloud logging read 'resource.type="cloud_run_revision" resource.labels.service_name="videosearch-cpu"' \
+  --limit=20 --format="value(textPayload)" --project=videosearch-comparison
+
+# Firebase deploy
+firebase deploy --only hosting --project=videosearch-comparison
+```
+
 ## Cleaning Up Old Images
 
 Container images with CUDA + models are ~15-20GB each. Clean up old tags:
